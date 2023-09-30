@@ -1,0 +1,182 @@
+[linters]
+enable = [
+    #   Full Repo Scan - Linters that find bugs.
+    #
+    "bodyclose", # checks whether HTTP response body is closed successfully
+    # Forgetting to close an HTTP body can be a memory leak
+    "durationcheck", # check for two durations multiplied together
+    # this is probably a rare bug, but should have basically zero false positives.
+    "errcheck", # finds unchecked error returns
+    # Checking all errors is just good dev practice.
+    "errorlint", # finds code that will cause problems with the error wrapping scheme introduced in Go 1.13
+    # This ensures you use errors.Is instead of == to compare errors, to avoid bugs with wrapping.
+    "exportloopref", # catch bugs resulting from referencing variables on range scope
+    # variables initialized in for loops change with each loop, which can cause bugs.
+    "forcetypeassert", # finds type asserts where you don't use the v, ok format
+    # if you do v := foo.(bar) and foo is not a bar, this will panic, and that's bad.
+    "gocritic", # Provides many diagnostics that check for bugs, performance and style issues.
+    # This is highly configurable, see the gocritic config section below.
+    "goerr113", # checks that you use errors.Is and don't define your own errors except as package variables.
+    # If you don't use errors.Is, then your code can break if someone wraps an error before they
+    # return it. Creating errors with errors.New("some message") makes a magic error that no one
+    # can handle, so either create it as a sentinel, or give it a type that people can check against.
+    "goimports", # check that all code is formatted with goimports
+    # Formating is good. goimports is better (and formats imports slightly differently than gofmt).
+    "gosec", # Inspects source code for security problems
+    # high quality linter that finds real bugs
+    "govet", # reports suspicious constructs like printf calls that don't have the right # of arguments
+    # high quality, low false positives
+    "ineffassign", # Detects when assignments to existing variables are not used
+    # this finds bugs all the time, where you assign to a value but then never use
+    # the assigned value due to shadowing etc.
+    "nolintlint", # Reports ill-formed or insufficient nolint directives
+    # ensures that you don't typo nolint comments. and that you justify them with why you are ignoring a linter here.
+    "rowserrcheck", # checks whether Err of rows is checked successfully
+    # finds bugs in SQL code
+    "sqlclosecheck", # Checks that sql.Rows and sql.Stmt are closed.
+    # easy and finds bugs
+    "typecheck", # parses and type-checks Go code
+    # probably unnecessary, but shouldn't hurt anything
+    "wastedassign", # finds wasted assignment statements.
+    # can find bugs where you assign something but never use it
+
+    #
+    # PR Scan - less critical, but should be fixed as we go along
+    #
+
+    "errname", # Checks that sentinel errors are prefixed with the Err and error types are suffixed with the Error.
+    # This is standard practice and makes it easy to find error types and sentinels in the code.
+    "gochecknoinits", # Checks that no init functions are present in Go code
+    # init is bad, and is almost never necessary, nor is it a good idea.
+    "godot", # Check if comments end in a period
+    # this is a recommended Go style, and not only makes your doc comments look more
+    # professional, it ensures that you don't stop a comment in the middle and forget
+    # to write the end of it.
+    "godox", # detects use of FIXME, TODO and other comment keywords
+    # These should be issues in an issue tracker, not comments in the code.
+    "gosimple", # tells you where you can simplify your code
+    # simple is good
+    "makezero", # checks that you don't accidentally make a slice w/ nonzero length and then append to it
+    # this can cause bugs where you make a slice of length 5 and then append 5 items to it,
+    # giving you a length of 10 where the first 5 are all zero values.
+    "misspell", # Finds commonly misspelled English words in comments
+    # we all suck at spelling and tpying
+    "nakedret", # Finds naked returns in functions greater than a specified function length
+    # naked returns are evil
+    "nestif", # Reports deeply nested if statements
+    # deeply nested ifs are hard to read
+    "nilerr", # Finds the code that returns nil even if it checks that the error is not nil.
+    # finds fairly common bug
+    "noctx", # noctx finds sending http request without context.Context
+    # you should always use context so we can cancel external requests
+    "prealloc", # Finds slice declarations that could potentially be preallocated
+    # this can save some memory and copying, otherwise append guesses how big to make slices and may need to
+    # copy all items in a slice to a bigger one.
+    "predeclared", # find code that shadows one of Go's predeclared identifiers
+    # you can make a variable called "true", but it's a bad idea.
+    "revive", # finds common style mistakes
+    # style and other mistakes that you really should listen to.
+    "staticcheck", # go vet on steroids, applying a ton of static analysis checks
+    # encompasses many linters in one, good stuff
+    "unconvert", # Remove unnecessary type conversions
+    # can save a little memory, unlikely to have false positives
+    "unused", # Checks for unused constants, variables, functions and types
+    # may have false positives, should watch this one
+]
+disable = []
+
+[run]
+timeout = "1m"
+issues-exit-code = 1
+tests = true
+
+[output]
+formats = "colored-line-number"
+print-issued-lines = true
+print-linter-name = true
+uniq-by-line = true
+path-prefix = ""
+sort-results = true
+
+[issues]
+max-issues-per-linter = 0
+max-same-issues = 0
+exclude-use-default = false
+include = []
+new = false
+
+[linters-settings.errcheck]
+# report about not checking of errors in type assertions: `a := b.(MyStruct)`;
+# default is false: such cases aren't reported by default.
+check-type-assertions = true
+# report about assignment of errors to blank identifier: `num, _ := strconv.Atoi(numStr)`;
+# default is false: such cases aren't reported by default.
+check-blank = false
+# path to a file containing a list of functions to exclude from checking
+# see https://github.com/kisielk/errcheck#excluding-functions for details
+exclude = ""
+# list of functions to exclude from checking, where each entry is a single function to exclude.
+# see https://github.com/kisielk/errcheck#excluding-functions for details
+exclude-functions = []
+
+[linters-settings.errorlint]
+# Check whether fmt.Errorf uses the %w verb for formatting errors. See the readme for caveats
+errorf = true
+# Check for plain type assertions and type switches
+asserts = false
+# Check for plain error comparisons
+comparison = false
+
+[linters-settings.gocritic]
+# Enable multiple checks by tags, run `GL_DEBUG=gocritic golangci-lint run` to see all tags and checks.
+# Empty list by default. See https://github.com/go-critic/go-critic#usage -> section "Tags".
+enabled-tags = [
+    "diagnostic",
+    "performance",
+    "style",
+]
+disabled-checks = [
+    # import shadow warns if a variable shadow the name of an imported package.
+    # kind of noisy, doesn't actually hurt anything, just may be momentarily confusing.
+    "importShadow",
+    "preferStringWriter",
+    "paramTypeCombine",
+    "unnamedResult",
+    "emptyStringTest",
+    "elseif",
+    "whyNoLint",
+]
+
+# HugeParam: warn if passing huge parameters by value; consider passing pointers instead.
+[linters-settings.gocritic.settings.hugeParam]
+# increase threshold from default (80 bytes) to 256 bytes.
+sizeThreshold = 256
+
+[linters-settings.goimports]
+# Goimports checks whether code was formatted with goimports.
+# uncomment if we want to enforce having GitHub-owned packages sorted into a separate section
+#local-prefixes = "github.com/github/"
+
+[linters-settings.govet]
+enable = ["httpresponse"]
+
+[linters-settings.gosec]
+excludes = [
+    "G301", # Expect directory permissions to be 0750 or less. See umask.
+    "G307", # deferring methods with errors. This duplicates errcheck, and I don't want to have to use two nolints.
+]
+
+[linters-settings.nolintlint]
+# adds some protections around nolint directives
+# Enable to ensure that nolint directives are all used. Default is true.
+allow-unused = false
+# Disable to ensure that nolint directives don't have a leading space. Default is true.
+allow-leading-space = false
+# Exclude following linters from requiring an explanation.  Default is [].
+allow-no-explanation = []
+# Enable to require an explanation of nonzero length after each nolint directive. Default is false.
+require-explanation = false
+# Enable to require nolint directives to mention the specific linter being suppressed. Default is false.
+require-specific = true
+
+[linters-settings.revive]
