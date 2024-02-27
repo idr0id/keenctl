@@ -13,7 +13,7 @@ import (
 
 var version = "[dev-build]"
 
-const usage = `routek - keep actual static routes on keenetic's router. 
+const usage = `routek - keep actual static routes on keenetic's router.
 
 Usage:
   routek [options] [-v]...
@@ -83,7 +83,7 @@ func main() {
 
 				if len(removeRoutes) > 0 {
 					l.Info().Str("interface", interfaceCfg.Name).
-						Msgf("remove %d outdated static routes")
+						Msgf("remove %d outdated static routes", len(removeRoutes))
 
 					bar := progressbar.Default(int64(len(removeRoutes)))
 					wg.Add(len(removeRoutes))
@@ -108,7 +108,7 @@ func main() {
 					wg.Wait()
 				} else {
 					l.Info().Str("interface", interfaceCfg.Name).
-						Msgf("no outdated static routes", len(removeRoutes))
+						Msg("no outdated static routes")
 				}
 			}
 

@@ -33,7 +33,7 @@ type IpRouteAddressResolver func(input string) ([]string, error)
 
 func (addr IpRouteAddress) Equals(other IpRouteAddress) bool {
 	addrNoSuffix, _ := strings.CutSuffix(addr.String(), "/32")
-	otherNoSuffix, _ := strings.CutSuffix(addr.String(), "/32")
+	otherNoSuffix, _ := strings.CutSuffix(other.String(), "/32")
 	return addrNoSuffix == otherNoSuffix
 }
 
