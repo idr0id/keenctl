@@ -11,8 +11,8 @@ keenctl is a utility for dynamically configuring Keenetic routers.
   * [ ] Rework `ssh.InsecureIgnoreHostKey()`
 * [ ] Allows configuration of the DNS server host.
 * [ ] Allows filtering of specific addresses or subnets.
-* [ ] Can run as a daemon.
-* [ ] Management of configuration via a Telegram bot.
+* [x] Adds the ability to run in serve mode.
+* [ ] Manages configuration via a Telegram bot.
 
 ## Configuration
 
