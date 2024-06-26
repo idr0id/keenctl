@@ -4,6 +4,8 @@ import (
 	"context"
 	"log/slog"
 	"slices"
+	"sync"
+	"time"
 
 	"github.com/idr0id/keenctl/internal/keenetic"
 	"github.com/idr0id/keenctl/internal/resolve"
@@ -14,16 +16,68 @@ type App struct {
 	logger        *slog.Logger
 	router        *keenetic.Router
 	currentRoutes []keenetic.IPRoute
+
+	wg     sync.WaitGroup
+	doneCh chan struct{}
 }
 
 func New(conf Config, logger *slog.Logger) *App {
 	return &App{
 		conf:   conf,
 		logger: logger,
+		doneCh: make(chan struct{}, 1),
 	}
 }
 
 func (a *App) Run() error {
+	routesCh := make(chan []keenetic.IPRoute)
+
+	a.wg.Add(1)
+	go func() {
+		defer a.wg.Done()
+
+		t := time.NewTimer(0)
+
+		for {
+			select {
+			case <-t.C:
+				a.logger.Info("resolving addresses for routes")
+				routes, err := a.resolveRoutes(context.Background())
+				if err != nil {
+					a.logger.Error("failed to resolve addresses for routes", slog.Any("error", err))
+					break
+				}
+				routesCh <- routes
+				t.Reset(time.Minute)
+
+			case <-a.doneCh:
+				close(routesCh)
+				return
+			}
+		}
+
+	}()
+
+	a.wg.Add(1)
+	go func() {
+		defer a.wg.Done()
+
+		if err := a.routerRun(routesCh); err != nil {
+			a.logger.Error("unable to start router", "error", err)
+		}
+	}()
+
+	a.wg.Wait()
+
+	return nil
+}
+
+func (a *App) Shutdown() {
+	close(a.doneCh)
+	a.wg.Wait()
+}
+
+func (a *App) routerRun(routesCh chan []keenetic.IPRoute) error {
 	a.logger.Info("connecting to router")
 	router, err := keenetic.Connect(a.conf.SSH, a.logger.WithGroup("keenetic"))
 	if err != nil {
@@ -37,30 +91,38 @@ func (a *App) Run() error {
 	}
 	a.currentRoutes = currentRoutes
 
-	a.logger.Info("starting to resolve addresses for routes")
-	routes, err := a.resolveRoutes()
-	if err != nil {
-		return err
-	}
+	for routes := range routesCh {
+		removedCount, err := a.removeRoutes(routes)
+		if err != nil {
+			return err
+		}
 
-	if err := a.removeOutdatedRoutes(routes); err != nil {
-		return err
-	}
+		addedCount, err := a.addRoutes(routes)
+		if err != nil {
+			return err
+		}
 
-	if err := a.addNewRoutes(routes); err != nil {
-		return err
+		if addedCount+removedCount > 0 {
+			a.logger.Info(
+				"routes successfully updated",
+				slog.Int("added", addedCount),
+				slog.Int("removed", removedCount),
+			)
+		} else {
+			a.logger.Info("nothing to update")
+		}
 	}
 
 	return nil
 }
 
-func (a *App) resolveRoutes() ([]keenetic.IPRoute, error) {
+func (a *App) resolveRoutes(ctx context.Context) ([]keenetic.IPRoute, error) {
 	var routes []keenetic.IPRoute
 
 	for _, interfaceConf := range a.conf.Interfaces {
 		for _, routeConf := range interfaceConf.Routes {
 			addresses, err := resolve.Addresses(
-				context.Background(),
+				ctx,
 				a.logger,
 				routeConf.Target,
 				routeConf.Resolver,
@@ -88,7 +150,7 @@ func (a *App) resolveRoutes() ([]keenetic.IPRoute, error) {
 	return routes, nil
 }
 
-func (a *App) removeOutdatedRoutes(routes []keenetic.IPRoute) error {
+func (a *App) removeRoutes(routes []keenetic.IPRoute) (int, error) {
 	cleanupInterfaceNames := make([]string, 0, len(a.conf.Interfaces))
 	for _, interfaceCfg := range a.conf.Interfaces {
 		if interfaceCfg.Cleanup {
@@ -106,18 +168,13 @@ func (a *App) removeOutdatedRoutes(routes []keenetic.IPRoute) error {
 	)
 
 	if len(outdatedRoutes) == 0 {
-		return nil
+		return 0, nil
 	}
 
-	a.logger.Info(
-		"cleanup outdated routes",
-		slog.Int("count", len(outdatedRoutes)),
-	)
-
-	return a.router.RemoveIPRoutes(outdatedRoutes)
+	return len(outdatedRoutes), a.router.RemoveIPRoutes(outdatedRoutes)
 }
 
-func (a *App) addNewRoutes(newRoutes []keenetic.IPRoute) error {
+func (a *App) addRoutes(newRoutes []keenetic.IPRoute) (int, error) {
 	// dont add exists routes twice
 	newRoutes = slices.DeleteFunc(
 		slices.Clone(newRoutes),
@@ -127,11 +184,8 @@ func (a *App) addNewRoutes(newRoutes []keenetic.IPRoute) error {
 	)
 
 	if len(newRoutes) == 0 {
-		a.logger.Info("no new routes to add")
-		return nil
+		return 0, nil
 	}
 
-	a.logger.Info("add new routes", slog.Int("count", len(newRoutes)))
-
-	return a.router.AddIPRoutes(newRoutes)
+	return len(newRoutes), a.router.AddIPRoutes(newRoutes)
 }
