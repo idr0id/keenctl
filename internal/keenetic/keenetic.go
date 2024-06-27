@@ -11,7 +11,7 @@ import (
 
 // Router manages SSH connections and executing commands to a network router.
 type Router struct {
-	connPool chan *sshClient
+	connPool chan *sshConn
 	logger   *slog.Logger
 	dryRun   bool
 }
@@ -19,14 +19,14 @@ type Router struct {
 // ErrMaxParallelCommands is the error when MaxParallelCommands is <= 0.
 var ErrMaxParallelCommands = errors.New("MaxParallelCommands must be greater than zero")
 
-// Connect initializes a new connection to Router using the provided configuration.
-func Connect(conf ConnConfig, logger *slog.Logger) (*Router, error) {
+// New initializes a new connection to Router using the provided configuration.
+func New(conf ConnConfig, logger *slog.Logger) (*Router, error) {
 	if conf.MaxParallelCommands == 0 {
 		return nil, ErrMaxParallelCommands
 	}
 
 	router := &Router{
-		connPool: make(chan *sshClient, conf.MaxParallelCommands),
+		connPool: make(chan *sshConn, conf.MaxParallelCommands),
 		logger:   logger,
 		dryRun:   conf.DryRun,
 	}
@@ -34,15 +34,13 @@ func Connect(conf ConnConfig, logger *slog.Logger) (*Router, error) {
 	var g errgroup.Group
 	for range conf.MaxParallelCommands {
 		g.Go(func() error {
-			sshClient, err := newSSHClient(conf)
+			sshClient, err := newSSHConn(conf)
 			if err == nil {
 				router.connPool <- sshClient
 			}
-
 			return err
 		})
 	}
-
 	if err := g.Wait(); err != nil {
 		return nil, err
 	}
@@ -85,7 +83,7 @@ func (r *Router) AddIPRoute(route IPRoute) error {
 }
 
 func (r *Router) AddIPRoutes(routes []IPRoute) error {
-	var g = errgroup.Group{}
+	var g errgroup.Group
 
 	for _, route := range routes {
 		route := route
@@ -114,7 +112,7 @@ func (r *Router) RemoveIPRoute(rout IPRoute) error {
 }
 
 func (r *Router) RemoveIPRoutes(routes []IPRoute) error {
-	var g = errgroup.Group{}
+	var g errgroup.Group
 
 	for _, route := range routes {
 		route := route
@@ -127,16 +125,16 @@ func (r *Router) RemoveIPRoutes(routes []IPRoute) error {
 }
 
 func (r *Router) exec(cmd string) (string, error) {
-	sshClient := <-r.connPool
+	conn := <-r.connPool
 	defer func() {
-		r.connPool <- sshClient
+		r.connPool <- conn
 	}()
 
 	if r.logger != nil {
 		r.logger.Debug("execute command", slog.Any("cmd", cmd))
 	}
 
-	out, err := sshClient.exec(cmd)
+	out, err := conn.exec(cmd)
 	if err != nil {
 		return "", fmt.Errorf("%s: %w", cmd, err)
 	}

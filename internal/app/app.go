@@ -4,12 +4,14 @@ import (
 	"context"
 	"log/slog"
 	"slices"
-	"sync"
 	"time"
 
 	"github.com/idr0id/keenctl/internal/keenetic"
 	"github.com/idr0id/keenctl/internal/resolve"
+	"golang.org/x/sync/errgroup"
 )
+
+const maxRetryDelay = 5 * time.Second
 
 type App struct {
 	conf          Config
@@ -17,7 +19,7 @@ type App struct {
 	router        *keenetic.Router
 	currentRoutes []keenetic.IPRoute
 
-	wg     sync.WaitGroup
+	eg     errgroup.Group
 	doneCh chan struct{}
 }
 
@@ -25,94 +27,144 @@ func New(conf Config, logger *slog.Logger) *App {
 	return &App{
 		conf:   conf,
 		logger: logger,
-		doneCh: make(chan struct{}, 1),
+		doneCh: make(chan struct{}),
 	}
 }
 
 func (a *App) Run() error {
-	routesCh := make(chan []keenetic.IPRoute)
+	var attempt int
 
-	a.wg.Add(1)
-	go func() {
-		defer a.wg.Done()
+	reconnectTimer := time.NewTimer(0)
+	defer reconnectTimer.Stop()
 
-		t := time.NewTimer(0)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
-		for {
-			select {
-			case <-t.C:
-				a.logger.Info("resolving addresses for routes")
-				routes, err := a.resolveRoutes(context.Background())
-				if err != nil {
-					a.logger.Error("failed to resolve addresses for routes", slog.Any("error", err))
-					break
+	for {
+		select {
+		case <-a.doneCh:
+			return nil
+
+		case <-reconnectTimer.C:
+			if attempt == 0 {
+				a.logger.Info("connecting to router")
+			}
+
+			if err := a.connectToRouter(); err != nil {
+				a.logger.Error(
+					"connection to router failed",
+					slog.Any("error", err),
+					slog.Int("attempt", attempt),
+				)
+				attempt++
+
+				delay := time.Duration(attempt) * time.Second
+				if delay > maxRetryDelay {
+					delay = maxRetryDelay
 				}
-				routesCh <- routes
-				t.Reset(time.Minute)
+				reconnectTimer.Reset(delay)
+				continue
+			}
 
-			case <-a.doneCh:
-				close(routesCh)
-				return
+			attempt = 0
+
+			if err := a.resolveAndSync(ctx); err != nil {
+				a.logger.Error("syncing to router failed: %s", slog.Any("error", err))
 			}
 		}
-
-	}()
-
-	a.wg.Add(1)
-	go func() {
-		defer a.wg.Done()
-
-		if err := a.routerRun(routesCh); err != nil {
-			a.logger.Error("unable to start router", "error", err)
-		}
-	}()
-
-	a.wg.Wait()
-
-	return nil
+	}
 }
 
 func (a *App) Shutdown() {
 	close(a.doneCh)
-	a.wg.Wait()
+	_ = a.eg.Wait()
 }
 
-func (a *App) routerRun(routesCh chan []keenetic.IPRoute) error {
-	a.logger.Info("connecting to router")
-	router, err := keenetic.Connect(a.conf.SSH, a.logger.WithGroup("keenetic"))
+func (a *App) resolveAndSync(ctx context.Context) error {
+	routesCh := make(chan []keenetic.IPRoute, 1)
+
+	ctx, cancel := context.WithCancel(ctx)
+	go func() {
+		<-a.doneCh
+		cancel()
+	}()
+
+	a.eg.Go(func() error {
+		t := time.NewTimer(0)
+		defer t.Stop()
+
+		for {
+			select {
+			case <-t.C:
+				routes, err := a.resolveRoutes(ctx)
+				if err != nil {
+					a.logger.Error("resolving an addresses for routes failed", slog.Any("error", err))
+					continue
+				}
+				routesCh <- routes
+				t.Reset(time.Minute)
+
+			case <-ctx.Done():
+				close(routesCh)
+				return nil
+			}
+		}
+	})
+
+	a.eg.Go(func() error {
+		for {
+			select {
+			case <-ctx.Done():
+				a.logger.Info("sync: shutting down")
+				return nil
+
+			case routes := <-routesCh:
+				if err := a.syncToRouter(routes); err != nil {
+					cancel()
+					return err
+				}
+			}
+		}
+	})
+
+	return a.eg.Wait()
+}
+
+func (a *App) connectToRouter() error {
+	router, err := keenetic.New(a.conf.SSH, a.logger.WithGroup("keenetic"))
 	if err != nil {
 		return err
 	}
 	a.router = router
 
-	currentRoutes, err := router.LoadIPRoutes()
+	currentRoutes, err := a.router.LoadIPRoutes()
 	if err != nil {
 		return err
 	}
 	a.currentRoutes = currentRoutes
+	return nil
+}
 
-	for routes := range routesCh {
-		removedCount, err := a.removeRoutes(routes)
-		if err != nil {
-			return err
-		}
-
-		addedCount, err := a.addRoutes(routes)
-		if err != nil {
-			return err
-		}
-
-		if addedCount+removedCount > 0 {
-			a.logger.Info(
-				"routes successfully updated",
-				slog.Int("added", addedCount),
-				slog.Int("removed", removedCount),
-			)
-		} else {
-			a.logger.Info("nothing to update")
-		}
+func (a *App) syncToRouter(routes []keenetic.IPRoute) error {
+	removedCount, err := a.removeRoutes(routes)
+	if err != nil {
+		return err
 	}
 
+	addedCount, err := a.addRoutes(routes)
+	if err != nil {
+		return err
+	}
+
+	if addedCount+removedCount > 0 {
+		a.logger.Info(
+			"routes successfully updated",
+			slog.Int("added", addedCount),
+			slog.Int("removed", removedCount),
+		)
+	} else {
+		a.logger.Info("nothing to update")
+	}
 	return nil
 }
 
