@@ -18,37 +18,45 @@ type ConnConfig struct {
 	DryRun              bool          `koanf:"dry_run"`
 }
 
-type sshClient struct {
+type sshConn struct {
 	*ssh.Client
+	conf ConnConfig
 }
 
-func newSSHClient(conf ConnConfig) (*sshClient, error) {
-	timeout := conf.Timeout
+func newSSHConn(conf ConnConfig) (*sshConn, error) {
+	c := &sshConn{Client: nil, conf: conf}
+	return c, c.connect()
+}
+
+func (c *sshConn) connect() error {
+	timeout := c.conf.Timeout
 	if timeout == 0 {
 		timeout = 30 * time.Second
 	}
 
 	var (
-		addr         = fmt.Sprintf("%s:%d", conf.Host, conf.Port)
+		addr         = fmt.Sprintf("%s:%d", c.conf.Host, c.conf.Port)
 		clientConfig = &ssh.ClientConfig{
-			User: conf.User,
+			User: c.conf.User,
 			Auth: []ssh.AuthMethod{
-				ssh.Password(conf.Password),
+				ssh.Password(c.conf.Password),
 			},
 			HostKeyCallback: ssh.InsecureIgnoreHostKey(), //nolint:gosec
 			Timeout:         timeout,
 		}
+		err error
 	)
 
-	client, err := ssh.Dial("tcp", addr, clientConfig)
-	if err != nil {
-		return nil, err
-	}
+	c.Client, err = ssh.Dial("tcp", addr, clientConfig)
 
-	return &sshClient{client}, nil
+	return err
 }
 
-func (c *sshClient) exec(cmd string) ([]byte, error) {
+func (c *sshConn) close() error {
+	return c.Client.Close()
+}
+
+func (c *sshConn) exec(cmd string) ([]byte, error) {
 	session, err := c.NewSession()
 	if err != nil {
 		return nil, err

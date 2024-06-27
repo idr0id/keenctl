@@ -22,4 +22,4 @@ vendor/
 go.work
 
 # configuration
-config.toml
+keenctl.toml
