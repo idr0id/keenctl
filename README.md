@@ -7,11 +7,12 @@ keenctl is a utility for dynamically configuring Keenetic routers.
 * [x] Configures static routes on Keenetic routers through SSH remote access.
 * [x] Provides the ability to resolve DNS and ASN addresses.
 * [x] Filters out private or unspecified addresses.
+* [x] Adds the ability to run in serve mode.
+* [ ] Adds support for TTL in DNS and ASN address resolution.
 * [ ] Supports the ssh-agent protocol.
   * [ ] Rework `ssh.InsecureIgnoreHostKey()`
 * [ ] Allows configuration of the DNS server host.
 * [ ] Allows filtering of specific addresses or subnets.
-* [x] Adds the ability to run in serve mode.
 * [ ] Manages configuration via a Telegram bot.
 
 ## Configuration
