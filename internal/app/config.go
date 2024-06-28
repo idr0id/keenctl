@@ -4,14 +4,16 @@ import (
 	"fmt"
 
 	"github.com/idr0id/keenctl/internal/keenetic"
+	"github.com/idr0id/keenctl/internal/resolve"
 	"github.com/knadh/koanf/parsers/toml"
 	"github.com/knadh/koanf/providers/file"
 	"github.com/knadh/koanf/v2"
 )
 
 type Config struct {
-	SSH        keenetic.ConnConfig `koanf:"ssh"`
-	Interfaces []InterfaceConfig   `koanf:"interfaces"`
+	SSH        keenetic.ConnConfig    `koanf:"ssh"`
+	Resolver   resolve.ResolverConfig `koanf:"resolver"`
+	Interfaces []InterfaceConfig      `koanf:"interfaces"`
 }
 
 func ParseConfig(path string, dryRun bool) (Config, error) {

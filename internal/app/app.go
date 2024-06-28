@@ -28,7 +28,7 @@ func New(conf Config, logger *slog.Logger) *App {
 	return &App{
 		conf:     conf,
 		logger:   logger,
-		resolver: resolve.New(logger),
+		resolver: resolve.New(conf.Resolver, logger),
 		doneCh:   make(chan struct{}),
 	}
 }

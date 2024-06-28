@@ -38,11 +38,11 @@ type Resolver struct {
 	filters   map[string]addressFilter
 }
 
-func New(logger *slog.Logger) *Resolver {
+func New(conf ResolverConfig, logger *slog.Logger) *Resolver {
 	return &Resolver{
 		logger: logger,
 		resolvers: map[string]addressResolver{
-			"dns":  resolveDNS,
+			"dns":  newDNSResolver(conf.Dns).resolve,
 			"asn":  resolveAsn,
 			"addr": resolveAddr,
 		},

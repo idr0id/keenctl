@@ -8,6 +8,7 @@ keenctl is a utility for dynamically configuring Keenetic routers.
 * [x] Provides the ability to resolve DNS and ASN addresses.
 * [x] Filters out private or unspecified addresses.
 * [x] Adds the ability to run in serve mode.
+* [x] Adds support for customizing nameservers.
 * [ ] Adds support for TTL in DNS and ASN address resolution.
 * [ ] Supports the ssh-agent protocol.
   * [ ] Rework `ssh.InsecureIgnoreHostKey()`
