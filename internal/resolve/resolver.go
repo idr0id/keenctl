@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/idr0id/keenctl/internal/network"
 )
@@ -14,6 +15,11 @@ import (
 type Address struct {
 	Addr        network.Addr
 	Description string
+	TTL         time.Duration
+}
+
+func (a Address) HasTTL() bool {
+	return a.TTL > 0
 }
 
 type (
@@ -26,25 +32,33 @@ var (
 	ErrFilterNotFound   = errors.New("address filter not found")
 )
 
-var (
-	resolvers = map[string]addressResolver{
-		"dns":  resolveDNS,
-		"asn":  resolveAsn,
-		"addr": resolveAddr,
-	}
-	filters = map[string]addressFilter{
-		"ipv4":        filterIPv4,
-		"ipv6":        filterIPv6,
-		"private":     filterPrivate,
-		"loopback":    filterLoopback,
-		"unspecified": filterUnspecified,
-	}
-)
+type Resolver struct {
+	logger    *slog.Logger
+	resolvers map[string]addressResolver
+	filters   map[string]addressFilter
+}
 
-// Addresses parse configuration and resolve routes addresses.
-func Addresses(
+func New(logger *slog.Logger) *Resolver {
+	return &Resolver{
+		logger: logger,
+		resolvers: map[string]addressResolver{
+			"dns":  resolveDNS,
+			"asn":  resolveAsn,
+			"addr": resolveAddr,
+		},
+		filters: map[string]addressFilter{
+			"ipv4":        filterIPv4,
+			"ipv6":        filterIPv6,
+			"private":     filterPrivate,
+			"loopback":    filterLoopback,
+			"unspecified": filterUnspecified,
+		},
+	}
+}
+
+// Resolve parse configuration and resolve routes addresses.
+func (r *Resolver) Resolve(
 	ctx context.Context,
-	logger *slog.Logger,
 	target string,
 	resolverName string,
 	filterNames []string,
@@ -53,7 +67,7 @@ func Addresses(
 		resolverName = "addr"
 	}
 
-	resolver, ok := resolvers[resolverName]
+	resolver, ok := r.resolvers[resolverName]
 	if !ok {
 		return nil, fmt.Errorf("address resolver: %s: %w", resolverName, ErrResolverNotFound)
 	}
@@ -63,13 +77,12 @@ func Addresses(
 		return nil, fmt.Errorf("address resolver: %s: %w", resolverName, err)
 	}
 
-	addressFilters, err := getFilters(filterNames)
+	filtered, err := r.filter(resolved, filterNames)
 	if err != nil {
 		return nil, fmt.Errorf("address filter: %w", err)
 	}
-	filtered := filter(resolved, addressFilters)
 
-	logger.Debug(
+	r.logger.Debug(
 		"resolver: addresses resolved successfully",
 		slog.String("target", target),
 		slog.String("resolver", resolverName),
@@ -97,7 +110,19 @@ func Addresses(
 	return addresses, nil
 }
 
-func filter(addresses []network.Addr, filters []addressFilter) []network.Addr {
+func (r *Resolver) filter(
+	addresses []network.Addr,
+	filterNames []string,
+) ([]network.Addr, error) {
+	filters := make([]addressFilter, 0, len(filterNames))
+	for _, filterName := range filterNames {
+		filter, ok := r.filters[filterName]
+		if !ok {
+			return nil, fmt.Errorf("%s: %w", filterName, ErrFilterNotFound)
+		}
+		filters = append(filters, filter)
+	}
+
 	result := make([]network.Addr, 0, len(addresses))
 	for _, address := range addresses {
 		ok := true
@@ -108,20 +133,6 @@ func filter(addresses []network.Addr, filters []addressFilter) []network.Addr {
 			result = append(result, address)
 		}
 	}
-	return result
-}
-
-func getFilters(filterNames []string) ([]addressFilter, error) {
-	result := make([]addressFilter, 0, len(filterNames))
-
-	for _, filterName := range filterNames {
-		f, ok := filters[filterName]
-		if !ok {
-			return nil, fmt.Errorf("%s: %w", filterName, ErrFilterNotFound)
-		}
-		result = append(result, f)
-	}
-
 	return result, nil
 }
 
