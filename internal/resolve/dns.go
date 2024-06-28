@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"strings"
+	"time"
 
 	"github.com/idr0id/keenctl/internal/network"
 	"github.com/miekg/dns"
@@ -37,10 +38,10 @@ func (r *dnsResolver) resolve(ctx context.Context, host string) ([]network.Addr,
 	for _, answer := range append(answerA, answerAAAA...) {
 		switch record := answer.(type) {
 		case *dns.A:
-			resolved = append(resolved, network.IP(record.A))
+			resolved = append(resolved, network.IPWithTTL(record.A, parseDNSAnswerTTL(answer)))
 
 		case *dns.AAAA:
-			resolved = append(resolved, network.IP(record.AAAA))
+			resolved = append(resolved, network.IPWithTTL(record.AAAA, parseDNSAnswerTTL(answer)))
 
 		case *dns.CNAME:
 			// do nothing
@@ -105,4 +106,8 @@ func formatNameservers(hosts []string) []string {
 		addresses[i] = net.JoinHostPort(host, "53")
 	}
 	return addresses
+}
+
+func parseDNSAnswerTTL(record dns.RR) time.Duration {
+	return time.Duration(record.Header().Ttl) * time.Second
 }

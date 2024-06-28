@@ -104,6 +104,7 @@ func (r *Resolver) Resolve(
 		addresses[i] = Address{
 			Addr:        addr,
 			Description: description,
+			TTL:         addr.TTL,
 		}
 	}
 
