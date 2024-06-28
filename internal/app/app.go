@@ -17,6 +17,7 @@ type App struct {
 	conf          Config
 	logger        *slog.Logger
 	router        *keenetic.Router
+	resolver      *resolve.Resolver
 	currentRoutes []keenetic.IPRoute
 
 	eg     errgroup.Group
@@ -25,9 +26,10 @@ type App struct {
 
 func New(conf Config, logger *slog.Logger) *App {
 	return &App{
-		conf:   conf,
-		logger: logger,
-		doneCh: make(chan struct{}),
+		conf:     conf,
+		logger:   logger,
+		resolver: resolve.New(logger),
+		doneCh:   make(chan struct{}),
 	}
 }
 
@@ -173,9 +175,8 @@ func (a *App) resolveRoutes(ctx context.Context) ([]keenetic.IPRoute, error) {
 
 	for _, interfaceConf := range a.conf.Interfaces {
 		for _, routeConf := range interfaceConf.Routes {
-			addresses, err := resolve.Addresses(
+			addresses, err := a.resolver.Resolve(
 				ctx,
-				a.logger,
 				routeConf.Target,
 				routeConf.Resolver,
 				routeConf.GetFilters(interfaceConf.Defaults),
