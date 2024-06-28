@@ -3,11 +3,13 @@ package network
 
 import (
 	"net"
+	"time"
 )
 
 // Addr represents and encapsulate `net.IPNet`.
 type Addr struct {
 	*net.IPNet
+	TTL time.Duration
 }
 
 // ParseCIDR parses s as a CIDR notation.
@@ -33,6 +35,12 @@ func IP(ip net.IP) Addr {
 
 	mask := net.CIDRMask(bits, bits)
 	return Addr{IPNet: &net.IPNet{IP: ip, Mask: mask}}
+}
+
+func IPWithTTL(ip net.IP, ttl time.Duration) Addr {
+	addr := IP(ip)
+	addr.TTL = ttl
+	return addr
 }
 
 // IsIPv4 reports whether network address is v4.
