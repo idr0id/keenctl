@@ -1,7 +1,10 @@
 package app
 
 import (
+	"container/heap"
 	"context"
+	"errors"
+	"fmt"
 	"log/slog"
 	"slices"
 	"time"
@@ -11,14 +14,17 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-const maxRetryDelay = 5 * time.Second
+const (
+	maxRetryDelay = 5 * time.Second
+	defaultMinTTL = time.Hour
+)
 
 type App struct {
-	conf          Config
-	logger        *slog.Logger
-	router        *keenetic.Router
-	resolver      *resolve.Resolver
-	currentRoutes []keenetic.IPRoute
+	conf         Config
+	logger       *slog.Logger
+	router       *keenetic.Router
+	resolver     *resolve.Resolver
+	resolveQueue *resolveQueue
 
 	eg     errgroup.Group
 	doneCh chan struct{}
@@ -71,7 +77,9 @@ func (a *App) Run() error {
 			attempt = 0
 
 			if err := a.resolveAndSync(ctx); err != nil {
-				a.logger.Error("syncing to router failed: %s", slog.Any("error", err))
+				if !errors.Is(err, context.Canceled) {
+					a.logger.Error("syncing to router failed", slog.Any("error", err))
+				}
 			}
 		}
 	}
@@ -98,13 +106,24 @@ func (a *App) resolveAndSync(ctx context.Context) error {
 		for {
 			select {
 			case <-t.C:
-				routes, err := a.resolveRoutes(ctx)
+				a.logger.Info("resolving addresses for routes")
+
+				routes, expireAt, err := a.resolveRoutes(ctx)
 				if err != nil {
-					a.logger.Error("resolving an addresses for routes failed", slog.Any("error", err))
+					a.logger.Error(
+						"resolving addresses for routes failed",
+						slog.Any("error", err),
+					)
 					continue
 				}
+
 				routesCh <- routes
-				t.Reset(time.Minute)
+
+				a.logger.Debug(
+					"scheduling resolving expired addresses for routes",
+					slog.Time("expire_at", expireAt),
+				)
+				t.Reset(time.Until(expireAt))
 
 			case <-ctx.Done():
 				close(routesCh)
@@ -117,11 +136,10 @@ func (a *App) resolveAndSync(ctx context.Context) error {
 		for {
 			select {
 			case <-ctx.Done():
-				a.logger.Info("sync: shutting down")
 				return nil
 
 			case routes := <-routesCh:
-				if err := a.syncToRouter(routes); err != nil {
+				if err := a.syncToRouter(ctx, routes); err != nil {
 					cancel()
 					return err
 				}
@@ -139,71 +157,141 @@ func (a *App) connectToRouter() error {
 	}
 	a.router = router
 
+	return nil
+}
+
+func (a *App) syncToRouter(
+	ctx context.Context,
+	routes []keenetic.IPRoute,
+) error {
 	currentRoutes, err := a.router.LoadIPRoutes()
 	if err != nil {
-		return err
-	}
-	a.currentRoutes = currentRoutes
-	return nil
-}
-
-func (a *App) syncToRouter(routes []keenetic.IPRoute) error {
-	removedCount, err := a.removeRoutes(routes)
-	if err != nil {
-		return err
+		return fmt.Errorf("loading current routes failed: %w", err)
 	}
 
-	addedCount, err := a.addRoutes(routes)
-	if err != nil {
-		return err
-	}
+	newRoutes := a.filterNewRoutes(currentRoutes, routes)
+	newRoutesCount := len(newRoutes)
 
-	if addedCount+removedCount > 0 {
+	outdatedRoutes := a.filterOutdatedRoutes(currentRoutes, routes)
+	outdatedRoutesCount := len(outdatedRoutes)
+
+	if newRoutesCount+outdatedRoutesCount > 0 {
 		a.logger.Info(
-			"routes successfully updated",
-			slog.Int("added", addedCount),
-			slog.Int("removed", removedCount),
+			"syncing routes to router",
+			slog.Int("new", newRoutesCount),
+			slog.Int("outdated", outdatedRoutesCount),
 		)
 	} else {
-		a.logger.Info("nothing to update")
+		a.logger.Info("nothing to syncing to router")
 	}
-	return nil
-}
 
-func (a *App) resolveRoutes(ctx context.Context) ([]keenetic.IPRoute, error) {
-	var routes []keenetic.IPRoute
-
-	for _, interfaceConf := range a.conf.Interfaces {
-		for _, routeConf := range interfaceConf.Routes {
-			addresses, err := a.resolver.Resolve(
-				ctx,
-				routeConf.Target,
-				routeConf.Resolver,
-				routeConf.GetFilters(interfaceConf.Defaults),
-			)
-			if err != nil {
-				a.logger.Warn("could not resolve addresses", slog.Any("error", err))
-				continue
-			}
-
-			routes = slices.Grow(routes, len(addresses))
-
-			for _, address := range addresses {
-				routes = append(routes, keenetic.IPRoute{
-					Destination: address.Addr,
-					Interface:   interfaceConf.Name,
-					Gateway:     routeConf.GetGateway(interfaceConf.Defaults),
-					Auto:        routeConf.GetAuto(interfaceConf.Defaults),
-					Description: address.Description,
-				})
-			}
+	if newRoutesCount > 0 {
+		err := a.router.AddIPRoutes(ctx, newRoutes)
+		if err != nil {
+			return fmt.Errorf("adding new routes failed: %w", err)
+		}
+	}
+	if outdatedRoutesCount > 0 {
+		err := a.router.RemoveIPRoutes(ctx, outdatedRoutes)
+		if err != nil {
+			return fmt.Errorf("removing outdated routes failed: %w", err)
 		}
 	}
 
-	return routes, nil
+	return nil
 }
 
-func (a *App) removeRoutes(routes []keenetic.IPRoute) (int, error) {
+func (a *App) resolveRoutes(ctx context.Context) ([]keenetic.IPRoute, time.Time, error) {
+	var (
+		unresolved   []*resolveEntry
+		nextExpireAt = time.Now().Add(defaultMinTTL)
+	)
+
+	if a.resolveQueue == nil {
+		unresolved = newResolveEntries(a)
+		a.resolveQueue = &resolveQueue{}
+	} else {
+		unresolved = a.resolveQueue.popExpiredRoutes()
+		if a.resolveQueue.Len() > 0 {
+			nextExpireAt = (*a.resolveQueue)[0].expireAt
+		}
+	}
+
+	routes := make([]keenetic.IPRoute, 0)
+	for _, entry := range *a.resolveQueue {
+		routes = append(routes, entry.routes...)
+	}
+
+	for _, entry := range unresolved {
+		now := time.Now()
+		if now.After(entry.expireAt) {
+			a.resolveRouteEntry(ctx, entry)
+		}
+		heap.Push(a.resolveQueue, entry)
+
+		if nextExpireAt.After(entry.expireAt) {
+			nextExpireAt = entry.expireAt
+		}
+
+		slices.Grow(routes, len(entry.routes))
+		routes = append(routes, entry.routes...)
+	}
+
+	return routes, nextExpireAt, nil
+}
+
+func (a *App) resolveRouteEntry(
+	ctx context.Context,
+	entry *resolveEntry,
+) time.Duration {
+	addresses, err := a.resolver.Resolve(
+		ctx,
+		entry.target,
+		entry.resolver,
+		entry.filters,
+	)
+
+	if err != nil {
+		if !errors.Is(err, context.Canceled) {
+			a.logger.Error("could not resolve addresses", slog.Any("error", err))
+		}
+		return defaultMinTTL
+	}
+
+	var (
+		minTTL = defaultMinTTL
+		now    = time.Now()
+		routes = make([]keenetic.IPRoute, 0, len(addresses))
+	)
+
+	for _, address := range addresses {
+		if address.HasTTL() {
+			minTTL = min(minTTL, address.TTL)
+		}
+		routes = append(routes, keenetic.IPRoute{
+			Destination: address.Addr,
+			Interface:   entry.interfaceName,
+			Gateway:     entry.gateway,
+			Auto:        entry.auto,
+			Description: address.Description,
+		})
+	}
+
+	entry.resolved(routes, now.Add(minTTL))
+
+	return minTTL
+}
+
+func (a *App) filterNewRoutes(currentRoutes, routes []keenetic.IPRoute) []keenetic.IPRoute {
+	return slices.DeleteFunc(
+		slices.Clone(routes),
+		func(newRoute keenetic.IPRoute) bool {
+			return slices.ContainsFunc(currentRoutes, newRoute.Equals)
+		},
+	)
+}
+
+func (a *App) filterOutdatedRoutes(currentRoutes, routes []keenetic.IPRoute) []keenetic.IPRoute {
 	cleanupInterfaceNames := make([]string, 0, len(a.conf.Interfaces))
 	for _, interfaceCfg := range a.conf.Interfaces {
 		if interfaceCfg.Cleanup {
@@ -211,34 +299,12 @@ func (a *App) removeRoutes(routes []keenetic.IPRoute) (int, error) {
 		}
 	}
 
-	outdatedRoutes := slices.DeleteFunc(
-		slices.Clone(a.currentRoutes),
+	return slices.DeleteFunc(
+		slices.Clone(currentRoutes),
 		func(route keenetic.IPRoute) bool {
 			return route.IsProtected() ||
 				!slices.Contains(cleanupInterfaceNames, route.Interface) ||
 				slices.ContainsFunc(routes, route.Equals)
 		},
 	)
-
-	if len(outdatedRoutes) == 0 {
-		return 0, nil
-	}
-
-	return len(outdatedRoutes), a.router.RemoveIPRoutes(outdatedRoutes)
-}
-
-func (a *App) addRoutes(newRoutes []keenetic.IPRoute) (int, error) {
-	// dont add exists routes twice
-	newRoutes = slices.DeleteFunc(
-		slices.Clone(newRoutes),
-		func(newRoute keenetic.IPRoute) bool {
-			return slices.ContainsFunc(a.currentRoutes, newRoute.Equals)
-		},
-	)
-
-	if len(newRoutes) == 0 {
-		return 0, nil
-	}
-
-	return len(newRoutes), a.router.AddIPRoutes(newRoutes)
 }
