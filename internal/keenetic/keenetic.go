@@ -2,6 +2,7 @@
 package keenetic
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -82,13 +83,33 @@ func (r *Router) AddIPRoute(route IPRoute) error {
 	return err
 }
 
-func (r *Router) AddIPRoutes(routes []IPRoute) error {
-	var g errgroup.Group
+func (r *Router) AddIPRoutes(ctx context.Context, routes []IPRoute) error {
+	g, ctx := errgroup.WithContext(ctx)
+	routesCh := make(chan IPRoute, len(routes))
 
-	for _, route := range routes {
-		route := route
+	g.Go(func() error {
+		defer close(routesCh)
+		for _, route := range routes {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			routesCh <- route
+		}
+		return nil
+	})
+
+	for range cap(r.connPool) {
 		g.Go(func() error {
-			return r.AddIPRoute(route)
+			for route := range routesCh {
+				if ctx.Err() != nil {
+					return ctx.Err()
+				}
+				err := r.AddIPRoute(route)
+				if err != nil {
+					return err
+				}
+			}
+			return nil
 		})
 	}
 
@@ -111,13 +132,33 @@ func (r *Router) RemoveIPRoute(rout IPRoute) error {
 	return err
 }
 
-func (r *Router) RemoveIPRoutes(routes []IPRoute) error {
-	var g errgroup.Group
+func (r *Router) RemoveIPRoutes(ctx context.Context, routes []IPRoute) error {
+	g, ctx := errgroup.WithContext(ctx)
+	routesCh := make(chan IPRoute)
 
-	for _, route := range routes {
-		route := route
+	g.Go(func() error {
+		defer close(routesCh)
+		for _, route := range routes {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			routesCh <- route
+		}
+		return nil
+	})
+
+	for range cap(r.connPool) {
 		g.Go(func() error {
-			return r.RemoveIPRoute(route)
+			for route := range routesCh {
+				if ctx.Err() != nil {
+					return ctx.Err()
+				}
+				err := r.RemoveIPRoute(route)
+				if err != nil {
+					return err
+				}
+			}
+			return nil
 		})
 	}
 
