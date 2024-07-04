@@ -1,0 +1,47 @@
+[ssh]
+# The IP address or hostname of the router
+host = "192.168.2.1"
+# The port to use for the SSH connection
+port = 22
+# The username for SSH authentication
+user = "admin"
+# The password for SSH authentication
+password = "admin"
+# The maximum number of parallel SSH commands
+max_parallel_commands = 2
+# The timeout for SSH commands
+timeout = "2500ms"
+
+[resolver.dns]
+# List of DNS nameservers
+nameservers = ["8.8.4.4", "8.8.8.8"]
+
+[[interfaces]]
+# The name of the interface
+name = "ISP"
+# Whether to clean up routes whose address TTL has expired
+cleanup = false
+# Default routes settings.
+defaults = { filters = ["ipv6", "private", "loopback", "unspecified",], auto = true }
+routes = [
+    # Route configuration with DNS resolver
+    { target = "wttr.in", resolver = "dns" },
+    # Route configuration with overrided auto flag
+    { target = "ifconfig.me", resolver = "dns", auto = false }
+]
+
+[[interfaces]]
+# The name of the interface
+name = "Wireguard0"
+# Whether to clean up routes whose address TTL has expired
+cleanup = true
+# Default routes settings.
+defaults = { filters = ["ipv6", "private", "loopback", "unspecified"], auto = true }
+routes = [
+    # Routes configuration with IP Subnet target
+    { resolver = "addr", target = "10.13.13.0/24" },
+    # Routes configuration with DNS resolver and specified auto flag and filters
+    { resolver = "dns", target = "example.org", auto = false, filters = ["private"] },
+    # Routes configuration with ASN resolver for Cloudflare ASN
+    { resolver = "asn", target = "13335" }
+]
