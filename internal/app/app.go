@@ -25,9 +25,6 @@ type App struct {
 	router       *keenetic.Router
 	resolver     *resolve.Resolver
 	resolveQueue *resolveQueue
-
-	eg     errgroup.Group
-	doneCh chan struct{}
 }
 
 func New(conf Config, logger *slog.Logger) *App {
@@ -35,24 +32,20 @@ func New(conf Config, logger *slog.Logger) *App {
 		conf:     conf,
 		logger:   logger,
 		resolver: resolve.New(conf.Resolver, logger),
-		doneCh:   make(chan struct{}),
 	}
 }
 
-func (a *App) Run() error {
+func (a *App) Run(ctx context.Context) error {
 	var attempt int
 
 	reconnectTimer := time.NewTimer(0)
 	defer reconnectTimer.Stop()
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
 	for {
 		select {
-		case <-a.doneCh:
-			return nil
-
 		case <-reconnectTimer.C:
 			if attempt == 0 {
 				a.logger.Info("connecting to router")
@@ -81,25 +74,25 @@ func (a *App) Run() error {
 					a.logger.Error("syncing to router failed", slog.Any("error", err))
 				}
 			}
+
+		case <-ctx.Done():
+			return nil
 		}
 	}
 }
 
-func (a *App) Shutdown() {
-	close(a.doneCh)
-	_ = a.eg.Wait()
-}
-
 func (a *App) resolveAndSync(ctx context.Context) error {
-	routesCh := make(chan []keenetic.IPRoute, 1)
-
 	ctx, cancel := context.WithCancel(ctx)
-	go func() {
-		<-a.doneCh
-		cancel()
-	}()
+	defer cancel()
 
-	a.eg.Go(func() error {
+	var (
+		routesCh = make(chan []keenetic.IPRoute, 1)
+		eg       errgroup.Group
+	)
+
+	eg.Go(func() error {
+		defer a.logger.Info("resolving: done")
+
 		t := time.NewTimer(0)
 		defer t.Stop()
 
@@ -132,22 +125,24 @@ func (a *App) resolveAndSync(ctx context.Context) error {
 		}
 	})
 
-	a.eg.Go(func() error {
+	eg.Go(func() error {
+		defer a.logger.Info("syncing: done")
+		defer cancel()
+
 		for {
 			select {
-			case <-ctx.Done():
-				return nil
-
 			case routes := <-routesCh:
 				if err := a.syncToRouter(ctx, routes); err != nil {
-					cancel()
 					return err
 				}
+
+			case <-ctx.Done():
+				return nil
 			}
 		}
 	})
 
-	return a.eg.Wait()
+	return eg.Wait()
 }
 
 func (a *App) connectToRouter() error {
