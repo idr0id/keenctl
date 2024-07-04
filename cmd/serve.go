@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"context"
+	"errors"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -31,31 +33,23 @@ func newServeCommand() *cobra.Command {
 				return silentErr
 			}
 
-			app := application.New(conf, logger)
-			appExitCh := make(chan error)
-
-			go func() {
-				appExitCh <- app.Run()
-			}()
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
 
 			signals := make(chan os.Signal, 1)
-			signal.Notify(signals, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM)
+			go func() {
+				signal.Notify(signals, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM)
+				<-signals
+				logger.Info("shutting down")
+				cancel()
+			}()
 
-			for {
-				select {
-				case <-signals:
-					logger.Info("shutting down")
-					app.Shutdown()
-					return nil
-
-				case err := <-appExitCh:
-					if err != nil {
-						logger.Error("application error", slog.Any("error", err))
-						return silentErr
-					}
-					return nil
-				}
+			app := application.New(conf, logger)
+			if err := app.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
+				logger.Error("application error", slog.Any("error", err))
+				return silentErr
 			}
+			return nil
 		},
 	}
 
