@@ -9,12 +9,12 @@ import (
 )
 
 func TestResolveDNS(t *testing.T) {
-	configs := []DnsConfig{
+	configs := []DNSConfig{
 		{Nameservers: nil},
 	}
 
 	for _, conf := range configs {
-		resolver := newDNSResolver(DnsConfig{})
+		resolver := newDNSResolver(DNSConfig{})
 		addresses, err := resolver.resolve(context.Background(), "example.com.")
 
 		require.NoError(t, err, fmt.Sprintf("configuration: %v", conf))
