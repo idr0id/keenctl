@@ -16,7 +16,7 @@ enable = [
     # if you do v := foo.(bar) and foo is not a bar, this will panic, and that's bad.
     "gocritic", # Provides many diagnostics that check for bugs, performance and style issues.
     # This is highly configurable, see the gocritic config section below.
-    "goerr113", # checks that you use errors.Is and don't define your own errors except as package variables.
+    "err113", # checks that you use errors.Is and don't define your own errors except as package variables.
     # If you don't use errors.Is, then your code can break if someone wraps an error before they
     # return it. Creating errors with errors.New("some message") makes a magic error that no one
     # can handle, so either create it as a sentinel, or give it a type that people can check against.
@@ -101,7 +101,7 @@ sort-results = true
 [issues]
 max-issues-per-linter = 0
 max-same-issues = 0
-exclude-use-default = false
+exclude-use-default = true
 include = []
 new = false
 
