@@ -36,13 +36,13 @@ func New(conf Config, logger *slog.Logger) *App {
 }
 
 func (a *App) Run(ctx context.Context) error {
-	var attempt int
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 
 	reconnectTimer := time.NewTimer(0)
 	defer reconnectTimer.Stop()
 
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
+	var attempt int
 
 	for {
 		select {
@@ -58,22 +58,16 @@ func (a *App) Run(ctx context.Context) error {
 					slog.Int("attempt", attempt),
 				)
 				attempt++
-
-				delay := time.Duration(attempt) * time.Second
-				if delay > maxRetryDelay {
-					delay = maxRetryDelay
+			} else {
+				if err := a.resolveAndSync(ctx); err != nil {
+					if !errors.Is(err, context.Canceled) {
+						a.logger.Error("syncing to router failed", slog.Any("error", err))
+					}
 				}
-				reconnectTimer.Reset(delay)
-				continue
+				attempt = 0
 			}
 
-			attempt = 0
-
-			if err := a.resolveAndSync(ctx); err != nil {
-				if !errors.Is(err, context.Canceled) {
-					a.logger.Error("syncing to router failed", slog.Any("error", err))
-				}
-			}
+			reconnectTimer.Reset(computeRetryDelay(attempt))
 
 		case <-ctx.Done():
 			return nil
@@ -303,4 +297,12 @@ func (a *App) filterOutdatedRoutes(currentRoutes, routes []keenetic.IPRoute) []k
 				slices.ContainsFunc(routes, route.Equals)
 		},
 	)
+}
+
+func computeRetryDelay(attempt int) time.Duration {
+	delay := time.Duration(attempt) * time.Second
+	if delay > maxRetryDelay {
+		delay = maxRetryDelay
+	}
+	return delay
 }
