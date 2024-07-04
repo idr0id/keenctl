@@ -177,7 +177,7 @@ func (a *App) syncToRouter(
 			slog.Int("outdated", outdatedRoutesCount),
 		)
 	} else {
-		a.logger.Info("nothing to syncing to router")
+		a.logger.Info("nothing to sync to router")
 	}
 
 	if newRoutesCount > 0 {
