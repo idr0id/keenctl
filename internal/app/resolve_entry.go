@@ -21,16 +21,16 @@ type resolveEntry struct {
 	auto          bool
 }
 
-func newResolveEntries(a *App) []*resolveEntry {
-	var unresolved []*resolveEntry
-	for _, interfaceConf := range a.conf.Interfaces {
-		slices.Grow(unresolved, len(interfaceConf.Routes))
+func newResolveEntries(conf Config) []*resolveEntry {
+	var entries []*resolveEntry
+	for _, interfaceConf := range conf.Interfaces {
+		entries = slices.Grow(entries, len(interfaceConf.Routes))
 
 		for _, routeConf := range interfaceConf.Routes {
-			unresolved = append(unresolved, newResolveEntry(interfaceConf, routeConf))
+			entries = append(entries, newResolveEntry(interfaceConf, routeConf))
 		}
 	}
-	return unresolved
+	return entries
 }
 
 func newResolveEntry(
@@ -53,7 +53,7 @@ func (e *resolveEntry) isExpired() bool {
 	return time.Now().After(e.expireAt)
 }
 
-func (e *resolveEntry) resolved(routes []keenetic.IPRoute, expireAt time.Time) {
+func (e *resolveEntry) applyChanges(routes []keenetic.IPRoute, expireAt time.Time) {
 	e.routes = routes
 	e.expireAt = expireAt.Truncate(expirePrecision).Add(expirePrecision)
 }

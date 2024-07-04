@@ -186,6 +186,7 @@ func (a *App) syncToRouter(
 			return fmt.Errorf("adding new routes failed: %w", err)
 		}
 	}
+
 	if outdatedRoutesCount > 0 {
 		err := a.router.RemoveIPRoutes(ctx, outdatedRoutes)
 		if err != nil {
@@ -203,7 +204,7 @@ func (a *App) resolveRoutes(ctx context.Context) ([]keenetic.IPRoute, time.Time,
 	)
 
 	if a.resolveQueue == nil {
-		unresolved = newResolveEntries(a)
+		unresolved = newResolveEntries(a.conf)
 		a.resolveQueue = &resolveQueue{}
 	} else {
 		unresolved = a.resolveQueue.popExpiredRoutes()
@@ -228,7 +229,7 @@ func (a *App) resolveRoutes(ctx context.Context) ([]keenetic.IPRoute, time.Time,
 			nextExpireAt = entry.expireAt
 		}
 
-		slices.Grow(routes, len(entry.routes))
+		routes = slices.Grow(routes, len(entry.routes))
 		routes = append(routes, entry.routes...)
 	}
 
@@ -272,7 +273,7 @@ func (a *App) resolveRouteEntry(
 		})
 	}
 
-	entry.resolved(routes, now.Add(minTTL))
+	entry.applyChanges(routes, now.Add(minTTL))
 
 	return minTTL
 }
