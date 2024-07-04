@@ -1,3 +1,4 @@
+// Package cmd provides the command-line interface for the keenctl application.
 package cmd
 
 import (
@@ -8,8 +9,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var silentErr = errors.New("SilentErr")
+var errSilent = errors.New("SilentErr")
 
+// Execute initializes and executes the root command for the keenctl CLI application.
 func Execute() {
 	rootCmd := &cobra.Command{
 		Use:   "keenctl",
@@ -23,13 +25,13 @@ func Execute() {
 	rootCmd.SetFlagErrorFunc(func(cmd *cobra.Command, err error) error {
 		cmd.Println(err)
 		cmd.Println(cmd.UsageString())
-		return silentErr
+		return errSilent
 	})
 	rootCmd.AddCommand(newServeCommand())
 	rootCmd.AddCommand(newVersionCommand())
 
 	if err := rootCmd.Execute(); err != nil {
-		if !errors.Is(err, silentErr) {
+		if !errors.Is(err, errSilent) {
 			_, _ = fmt.Fprintln(os.Stderr, err)
 		}
 		os.Exit(1)

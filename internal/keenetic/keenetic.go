@@ -83,6 +83,7 @@ func (r *Router) AddIPRoute(route IPRoute) error {
 	return err
 }
 
+// AddIPRoutes adds a multiple new IP routes to the router's routing table.
 func (r *Router) AddIPRoutes(ctx context.Context, routes []IPRoute) error {
 	g, ctx := errgroup.WithContext(ctx)
 	routesCh := make(chan IPRoute, len(routes))
@@ -132,6 +133,7 @@ func (r *Router) RemoveIPRoute(rout IPRoute) error {
 	return err
 }
 
+// RemoveIPRoutes removes a multiple IP routes from the router's routing table.
 func (r *Router) RemoveIPRoutes(ctx context.Context, routes []IPRoute) error {
 	g, ctx := errgroup.WithContext(ctx)
 	routesCh := make(chan IPRoute)

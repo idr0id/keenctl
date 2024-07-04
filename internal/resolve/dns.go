@@ -2,6 +2,7 @@ package resolve
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"strings"
@@ -11,12 +12,15 @@ import (
 	"github.com/miekg/dns"
 )
 
+// ErrDNSResolver is a common error for DNS resolver.
+var ErrDNSResolver = errors.New("DNS resolver error")
+
 type dnsResolver struct {
 	client *dns.Client
-	conf   DnsConfig
+	conf   DNSConfig
 }
 
-func newDNSResolver(conf DnsConfig) *dnsResolver {
+func newDNSResolver(conf DNSConfig) *dnsResolver {
 	return &dnsResolver{
 		client: &dns.Client{},
 		conf:   conf,
@@ -47,7 +51,7 @@ func (r *dnsResolver) resolve(ctx context.Context, host string) ([]network.Addr,
 			// do nothing
 
 		default:
-			return nil, fmt.Errorf("dns resolver: unexpected answer type: %T", record)
+			return nil, fmt.Errorf("%w: unexpected answer type: %T", ErrDNSResolver, record)
 		}
 	}
 
@@ -61,7 +65,7 @@ func (r *dnsResolver) getNameservers() ([]string, error) {
 
 	resolvConf, err := dns.ClientConfigFromFile("/etc/resolv.conf")
 	if err != nil {
-		return nil, fmt.Errorf("unable to read /etc/resolv.conf: %w", err)
+		return nil, fmt.Errorf("%w: unable to read /etc/resolv.conf: %w", ErrDNSResolver, err)
 	}
 
 	return formatNameservers(resolvConf.Servers), nil
@@ -87,7 +91,7 @@ func (r *dnsResolver) sendQuestion(ctx context.Context, host string, dnsType uin
 		if response.Rcode == dns.RcodeSuccess {
 			return response.Answer, nil
 		}
-		serverErr = fmt.Errorf("dns: resolution failed: %s", response.String())
+		serverErr = fmt.Errorf("%w: resolution failed: %s", ErrDNSResolver, response.String())
 	}
 
 	return nil, serverErr

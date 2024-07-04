@@ -23,14 +23,14 @@ func newServeCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "serve",
 		Short: "Runs in serve mode",
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(_ *cobra.Command, _ []string) error {
 			logger := setupLogger(verbose, quiet)
 
 			logger.Info("parsing configuration")
 			conf, err := application.ParseConfig(configPath, dryRun)
 			if err != nil {
 				logger.Error("configuration error", slog.Any("error", err))
-				return silentErr
+				return errSilent
 			}
 
 			ctx, cancel := context.WithCancel(context.Background())
@@ -41,7 +41,7 @@ func newServeCommand() *cobra.Command {
 			app := application.New(conf, logger)
 			if err := app.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
 				logger.Error("application error", slog.Any("error", err))
-				return silentErr
+				return errSilent
 			}
 			return nil
 		},

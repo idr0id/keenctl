@@ -1,9 +1,9 @@
 package resolve
 
 type ResolverConfig struct {
-	Dns DnsConfig `koanf:"dns"`
+	DNS DNSConfig `koanf:"dns"`
 }
 
-type DnsConfig struct {
+type DNSConfig struct {
 	Nameservers []string `koanf:"nameservers"`
 }

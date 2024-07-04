@@ -63,7 +63,8 @@ type resolveQueue []*resolveEntry
 func (q *resolveQueue) popExpiredRoutes() []*resolveEntry {
 	var unresolved []*resolveEntry
 	for q.Len() > 0 && (*q)[0].isExpired() {
-		unresolved = append(unresolved, heap.Pop(q).(*resolveEntry))
+		entry, _ := heap.Pop(q).(*resolveEntry)
+		unresolved = append(unresolved, entry)
 	}
 	return unresolved
 }
@@ -82,7 +83,8 @@ func (q *resolveQueue) Swap(i, j int) {
 }
 
 func (q *resolveQueue) Push(x any) {
-	*q = append(*q, x.(*resolveEntry))
+	entry, _ := x.(*resolveEntry)
+	*q = append(*q, entry)
 }
 
 func (q *resolveQueue) Pop() any {

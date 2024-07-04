@@ -8,16 +8,6 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-type ConnConfig struct {
-	Host                string        `koanf:"host"`
-	Port                int           `koanf:"port"`
-	User                string        `koanf:"user"`
-	Password            string        `koanf:"password"`
-	MaxParallelCommands uint          `koanf:"max_parallel_commands"`
-	Timeout             time.Duration `koanf:"timeout"`
-	DryRun              bool          `koanf:"dry_run"`
-}
-
 type sshConn struct {
 	*ssh.Client
 	conf ConnConfig
@@ -25,7 +15,10 @@ type sshConn struct {
 
 func newSSHConn(conf ConnConfig) (*sshConn, error) {
 	c := &sshConn{Client: nil, conf: conf}
-	return c, c.connect()
+	if err := c.connect(); err != nil {
+		return nil, err
+	}
+	return c, nil
 }
 
 func (c *sshConn) connect() error {
@@ -50,10 +43,6 @@ func (c *sshConn) connect() error {
 	c.Client, err = ssh.Dial("tcp", addr, clientConfig)
 
 	return err
-}
-
-func (c *sshConn) close() error {
-	return c.Client.Close()
 }
 
 func (c *sshConn) exec(cmd string) ([]byte, error) {

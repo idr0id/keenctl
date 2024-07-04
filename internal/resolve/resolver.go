@@ -18,6 +18,7 @@ type Address struct {
 	TTL         time.Duration
 }
 
+// HasTTL checks if the Address has a Time-To-Live (TTL) value greater than zero.
 func (a Address) HasTTL() bool {
 	return a.TTL > 0
 }
@@ -42,7 +43,7 @@ func New(conf ResolverConfig, logger *slog.Logger) *Resolver {
 	return &Resolver{
 		logger: logger,
 		resolvers: map[string]addressResolver{
-			"dns":  newDNSResolver(conf.Dns).resolve,
+			"dns":  newDNSResolver(conf.DNS).resolve,
 			"asn":  resolveAsn,
 			"addr": resolveAddr,
 		},
