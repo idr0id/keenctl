@@ -36,13 +36,7 @@ func newServeCommand() *cobra.Command {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 
-			signals := make(chan os.Signal, 1)
-			go func() {
-				signal.Notify(signals, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM)
-				<-signals
-				logger.Info("shutting down")
-				cancel()
-			}()
+			registerSignalHandler(logger, cancel)
 
 			app := application.New(conf, logger)
 			if err := app.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
@@ -59,4 +53,16 @@ func newServeCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&quiet, "quiet", false, "Silent mode")
 
 	return cmd
+}
+
+func registerSignalHandler(logger *slog.Logger, cancel context.CancelFunc) {
+	signals := make(chan os.Signal, 1)
+	go func() {
+		signal.Notify(signals, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM)
+		<-signals
+
+		signal.Stop(signals)
+		logger.Info("shutting down")
+		cancel()
+	}()
 }
